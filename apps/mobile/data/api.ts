@@ -109,6 +109,8 @@ import {
   MemberListSchema,
   PinListSchema,
   PinnedItemSchema,
+  PublicAuthConfigSchema,
+  EMPTY_PUBLIC_AUTH_CONFIG,
   ProjectSchema,
   RuntimeListSchema,
   SearchIssuesResponseSchema,
@@ -120,6 +122,7 @@ import {
   UserSchema,
   WorkspaceListSchema,
 } from "./schemas";
+import type { PublicAuthConfig } from "./schemas";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
@@ -366,6 +369,15 @@ class ApiClient {
   }
 
   // --- Auth ---
+  async getPublicAuthConfig(): Promise<PublicAuthConfig> {
+    return this.fetchValidated(
+      "/api/config",
+      PublicAuthConfigSchema,
+      EMPTY_PUBLIC_AUTH_CONFIG,
+      { endpoint: "getPublicAuthConfig" },
+    );
+  }
+
   async sendCode(email: string): Promise<void> {
     await this.fetch<void>("/auth/send-code", {
       method: "POST",
