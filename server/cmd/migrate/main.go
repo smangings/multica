@@ -274,6 +274,8 @@ var concurrentIndexCleanups = map[string]string{
 	"438_agent_runtime_online_last_seen_index":                  "idx_agent_runtime_online_last_seen",
 	"439_agent_runtime_offline_last_seen_index":                 "idx_agent_runtime_offline_last_seen",
 	"440_github_pr_head_sha_index":                              "idx_github_pull_request_head_sha",
+	"442_user_oidc_identity_subject_index":                      "idx_user_oidc_identity_issuer_subject",
+	"443_user_oidc_identity_user_index":                         "idx_user_oidc_identity_user_id",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

@@ -99,7 +99,80 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
-const getUsersByIDs = `-- name: GetUsersByIDs :many
+const createOIDCIdentity = `-- name: CreateOIDCIdentity :exec
+INSERT INTO user_oidc_identity (issuer, subject, user_id, email)
+VALUES ($1, $2, $3, $4)
+`
+
+type CreateOIDCIdentityParams struct {
+	Issuer  string      `json:"issuer"`
+	Subject string      `json:"subject"`
+	UserID  pgtype.UUID `json:"user_id"`
+	Email   string      `json:"email"`
+}
+
+func (q *Queries) CreateOIDCIdentity(ctx context.Context, arg CreateOIDCIdentityParams) error {
+	_, err := q.db.Exec(ctx, createOIDCIdentity,
+		arg.Issuer,
+		arg.Subject,
+		arg.UserID,
+		arg.Email,
+	)
+	return err
+}
+
+const getUserByOIDCIdentity = `-- name: GetUserByOIDCIdentity :one
+SELECT u.id, u.name, u.email, u.avatar_url, u.created_at, u.updated_at, u.onboarded_at, u.onboarding_questionnaire, u.cloud_waitlist_email, u.cloud_waitlist_reason, u.starter_content_state, u.language, u.profile_description, u.timezone
+FROM user_oidc_identity AS identity
+JOIN "user" AS u ON u.id = identity.user_id
+WHERE identity.issuer = $1 AND identity.subject = $2
+`
+
+type GetUserByOIDCIdentityParams struct {
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
+}
+
+func (q *Queries) GetUserByOIDCIdentity(ctx context.Context, arg GetUserByOIDCIdentityParams) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByOIDCIdentity, arg.Issuer, arg.Subject)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+	)
+	return i, err
+}
+
+const updateOIDCIdentityEmail = `-- name: UpdateOIDCIdentityEmail :exec
+UPDATE user_oidc_identity
+SET email = $3, updated_at = now()
+WHERE issuer = $1 AND subject = $2 AND email IS DISTINCT FROM $3
+`
+
+type UpdateOIDCIdentityEmailParams struct {
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
+	Email   string `json:"email"`
+}
+
+func (q *Queries) UpdateOIDCIdentityEmail(ctx context.Context, arg UpdateOIDCIdentityEmailParams) error {
+	_, err := q.db.Exec(ctx, updateOIDCIdentityEmail, arg.Issuer, arg.Subject, arg.Email)
+	return err
+}
+
+const getUsersByIDs = `-- name: GetUsersByIDs :many`
 SELECT id, name, email, avatar_url FROM "user"
 WHERE id = ANY($1::uuid[])
 `

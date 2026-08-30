@@ -168,11 +168,15 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 // event fires on that edge, covering both the verification-code and Google
 // OAuth entry points.
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
+	return h.findOrCreateUserWithQueries(ctx, h.Queries, email)
+}
+
+func (h *Handler) findOrCreateUserWithQueries(ctx context.Context, queries *db.Queries, email string) (user db.User, isNew bool, err error) {
 	if auth.IsTemporarilyDisabledUserEmail(email) {
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
 	}
 
-	user, err = h.Queries.GetUserByEmail(ctx, email)
+	user, err = queries.GetUserByEmail(ctx, email)
 	isNew = isNotFound(err)
 	if err != nil && !isNew {
 		return db.User{}, false, err
@@ -193,7 +197,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	if at := strings.Index(email, "@"); at > 0 {
 		name = email[:at]
 	}
-	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
+	created, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Name:  name,
 		Email: email,
 	})
@@ -201,6 +205,84 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, err
 	}
 	return created, true, nil
+}
+
+func (h *Handler) completeFederatedLogin(w http.ResponseWriter, r *http.Request, email, name, picture, method string) (LoginResponse, bool) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	user, isNew, err := h.findOrCreateUser(r.Context(), email)
+	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return LoginResponse{}, false
+		}
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return LoginResponse{}, false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return LoginResponse{}, false
+	}
+	return h.completeFederatedLoginForUser(w, r, user, isNew, name, picture, method)
+}
+
+func (h *Handler) completeFederatedLoginForUser(w http.ResponseWriter, r *http.Request, user db.User, isNew bool, name, picture, method string) (LoginResponse, bool) {
+	if isNew {
+		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
+		evt.Properties["auth_method"] = method
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
+	}
+
+	needsUpdate := false
+	newName := user.Name
+	newAvatar := user.AvatarUrl
+
+	if name != "" && user.Name == strings.Split(user.Email, "@")[0] {
+		newName = name
+		needsUpdate = true
+	}
+	if picture != "" && !user.AvatarUrl.Valid {
+		newAvatar = pgtype.Text{String: picture, Valid: true}
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		updated, err := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{
+			ID:        user.ID,
+			Name:      newName,
+			AvatarUrl: newAvatar,
+		})
+		if err == nil {
+			user = updated
+		}
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return LoginResponse{}, false
+		}
+		slog.Warn(method+" login failed", append(logger.RequestAttrs(r), "error", err, "email", user.Email)...)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return LoginResponse{}, false
+	}
+
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
+	}
+
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(72 * time.Hour)) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	slog.Info("user logged in via "+method, append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	return LoginResponse{
+		Token: tokenString,
+		User:  h.userToResponse(user),
+	}, true
 }
 
 // signupSourceFromRequest reads the attribution cookie the web frontend
