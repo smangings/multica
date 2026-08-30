@@ -1,0 +1,42 @@
+name: Notify Multica autopilot on sync failure
+
+# Fires after any workflow run on this repo completes; dispatches the
+# Multica "Fix fork upstream sync failures" autopilot only when a sync
+# workflow failed.
+on:
+  workflow_run:
+    workflows:
+      - "Sync fork with upstream"
+      - "Rebase and tag for GHCR"   # adjust to your rebase/tag workflow's exact name, or remove
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  notify-multica:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    steps:
+      - name: Dispatch Multica autopilot webhook
+        env:
+          MULTICA_WEBHOOK_URL: ${{ secrets.FORK_SYNC_MULTICA_WEBHOOK_URL }}
+          FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          payload=$(jq -n \
+            --arg workflow "$FAILED_WORKFLOW" \
+            --arg run_id "$RUN_ID" \
+            --arg run_url "$RUN_URL" \
+            --arg branch "$BRANCH" \
+            '{event: "workflow_run.failure", workflow: $workflow, run_id: $run_id,
+              run_url: $run_url, branch: $branch, repository: "benjsnellings/multica"}')
+          http_code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X POST "$MULTICA_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -H "Idempotency-Key: sync-failure-$RUN_ID" \
+            -d "$payload")
+          echo "Multica responded $http_code: $(cat /tmp/resp.json)"
+          # 200 with status=accepted means a run was enqueued
+          test "$http_code" = "200"
