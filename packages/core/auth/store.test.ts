@@ -61,3 +61,31 @@ describe("authStore", () => {
     expect(store.getState().status).toBe("unauthenticated");
   });
 });
+
+describe("authStore.loginWithOIDC", () => {
+  it("stores the Multica token and returns the protected app state", async () => {
+    const storage = makeStorage();
+    const api = {
+      setToken: vi.fn(),
+      oidcLogin: vi.fn().mockResolvedValue({
+        token: "oidc-jwt",
+        user: fakeUser,
+        app_state: "next:/invite/123",
+      }),
+    } as unknown as ApiClient;
+    const store = createAuthStore({ api, storage });
+
+    const result = await store
+      .getState()
+      .loginWithOIDC("authorization-code", "oidc.state");
+
+    expect(api.oidcLogin).toHaveBeenCalledWith(
+      "authorization-code",
+      "oidc.state",
+    );
+    expect(storage.snapshot().multica_token).toBe("oidc-jwt");
+    expect(api.setToken).toHaveBeenCalledWith("oidc-jwt");
+    expect(store.getState().user).toEqual(fakeUser);
+    expect(result.appState).toBe("next:/invite/123");
+  });
+});
