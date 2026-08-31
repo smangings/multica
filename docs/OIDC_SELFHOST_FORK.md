@@ -8,19 +8,19 @@ rollback).
 
 ## 1. Prerequisites — images and migrations
 
-The OIDC server code, migrations **285–287**, and the compose/Helm wiring land
+The OIDC server code, migrations **441–443**, and the compose/Helm wiring land
 together on fork `main`. Before configuring anything:
 
 1. Pull a fork image that contains the OIDC code:
    ```bash
-   # docker-compose.selfhost.yml defaults
-   MULTICA_BACKEND_IMAGE=ghcr.io/benjsnellings/multica-backend
-   MULTICA_WEB_IMAGE=ghcr.io/benjsnellings/multica-web
+   # docker-compose.selfhost.yml / .env.example defaults
+   MULTICA_BACKEND_IMAGE=ghcr.io/smangings/multica-backend
+   MULTICA_WEB_IMAGE=ghcr.io/smangings/multica-web
    docker compose -f docker-compose.selfhost.yml pull backend web
    ```
-   Images are published by the fork's `release.yml` from `main` — do not
-   attempt OIDC on an image built before the #5792 merge.
-2. Migrations 285–287 run automatically on backend startup (`migrate up`).
+   Images are published by the fork's `release.yml` from a version tag on `main`
+   — do not attempt OIDC on an image built before the HOME-57 merge.
+2. Migrations 441–443 run automatically on backend startup (`migrate up`).
    Verify before first OIDC login:
    ```bash
    docker compose -f docker-compose.selfhost.yml exec backend \
